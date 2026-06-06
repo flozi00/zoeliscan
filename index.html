@@ -77,7 +77,7 @@
       </a>
       <div class="runtime-strip" aria-live="polite">
         <span id="connectionBadge" class="status-badge status-badge--neutral">Netzwerk wird geprüft</span>
-        <span id="runtimeStatus" class="status-badge status-badge--neutral">Modell nicht geladen</span>
+        <span id="runtimeStatus" class="status-badge status-badge--neutral">OCR nicht geladen</span>
       </div>
     </header>
 
@@ -114,7 +114,7 @@
           </button>
           <button id="modelButton" class="button button--secondary" type="button">
             <svg><use href="#icon-download"></use></svg>
-            <span>Modell vorbereiten</span>
+            <span>OCR vorbereiten</span>
           </button>
           <button id="scanButton" class="button button--primary" type="button">
             <svg><use href="#icon-scan"></use></svg>
@@ -128,8 +128,8 @@
 
         <div class="progress-row">
           <div>
-            <strong id="modelProgressLabel">Modell wartet</strong>
-            <span id="modelProgressDetail">Beim ersten Start werden Transformers.js und TrOCR in den Browser geladen.</span>
+            <strong id="modelProgressLabel">OCR wartet</strong>
+            <span id="modelProgressDetail">Beim ersten Start werden OCR-Dateien in den Browser geladen.</span>
           </div>
           <progress id="modelProgress" value="0" max="100"></progress>
         </div>
@@ -197,8 +197,17 @@
 
         <div class="settings-grid">
           <label class="field">
+            <span>Scan-Profil</span>
+            <select id="scanProfileSelect">
+              <option value="curved-label">Dose / Flasche</option>
+              <option value="ingredients">Zutatenfeld</option>
+              <option value="small-text">Kleiner Text</option>
+            </select>
+          </label>
+          <label class="field">
             <span>Live-Intervall</span>
             <select id="intervalSelect">
+              <option value="1500">1,5 Sekunden</option>
               <option value="2500">2,5 Sekunden</option>
               <option value="4000">4 Sekunden</option>
               <option value="6500">6,5 Sekunden</option>
@@ -206,8 +215,9 @@
             </select>
           </label>
           <label class="field">
-            <span>OCR-Modell</span>
+            <span>OCR-Methode</span>
             <select id="modelSelect">
+              <option value="tesseract-deu">Schnell: Tesseract Deutsch</option>
               <option value="Xenova/trocr-small-printed">TrOCR small printed</option>
               <option value="Xenova/trocr-base-printed">TrOCR base printed</option>
             </select>

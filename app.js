@@ -1,10 +1,60 @@
 const STORAGE_KEY = "zoli-scan-settings";
+const APP_VERSION = "2026-06-06-ocr-v3";
 
 const DEFAULT_SETTINGS = {
-  intervalMs: 4000,
-  modelId: "Xenova/trocr-small-printed",
+  intervalMs: 2500,
+  modelId: "tesseract-deu",
+  scanProfile: "curved-label",
   autoCopy: true,
   strictTrace: true,
+};
+
+const DEFAULT_MODEL_ID = "tesseract-deu";
+const DEFAULT_SCAN_PROFILE = "curved-label";
+const OCR_CANVAS_PADDING = 18;
+const SCAN_PROFILES = {
+  "curved-label": {
+    frame: { x: 0.18, y: 0.08, width: 0.64, height: 0.78 },
+    targetWidth: 1180,
+    liveTargetWidth: 940,
+    minTargetWidth: 760,
+    contrast: 1.2,
+    brightness: 1.05,
+    adaptiveRadiusRatio: 0.034,
+    thresholdBias: 6,
+    psm: "4",
+    fallbackPsm: "11",
+    minTextLength: 34,
+    minConfidence: 42,
+  },
+  ingredients: {
+    frame: { x: 0.08, y: 0.16, width: 0.84, height: 0.66 },
+    targetWidth: 1120,
+    liveTargetWidth: 900,
+    minTargetWidth: 720,
+    contrast: 1.18,
+    brightness: 1.05,
+    adaptiveRadiusRatio: 0.036,
+    thresholdBias: 5,
+    psm: "6",
+    fallbackPsm: "4",
+    minTextLength: 30,
+    minConfidence: 40,
+  },
+  "small-text": {
+    frame: { x: 0.06, y: 0.08, width: 0.88, height: 0.82 },
+    targetWidth: 1420,
+    liveTargetWidth: 1080,
+    minTargetWidth: 900,
+    contrast: 1.24,
+    brightness: 1.06,
+    adaptiveRadiusRatio: 0.028,
+    thresholdBias: 7,
+    psm: "4",
+    fallbackPsm: "11",
+    minTextLength: 40,
+    minConfidence: 44,
+  },
 };
 
 const GLUTEN_RULES = [
@@ -12,7 +62,15 @@ const GLUTEN_RULES = [
     id: "gluten",
     label: "Gluten",
     severity: "danger",
-    terms: ["gluten", "gluteneiweiss", "gluteneiweiß", "glutenprotein"],
+    terms: [
+      "gluten",
+      "glutenhaltig",
+      "glutenhaltige",
+      "glutenhaltiges",
+      "gluteneiweiss",
+      "gluteneiweiß",
+      "glutenprotein",
+    ],
     note: "Direkter Gluten-Hinweis.",
   },
   {
@@ -27,11 +85,21 @@ const GLUTEN_RULES = [
       "weizengriess",
       "weizengrieß",
       "weizenkleie",
+      "weizeneiweiss",
+      "weizeneiweiß",
+      "weizengluten",
       "hartweizen",
       "weichweizen",
       "wheat",
       "wheat flour",
       "wheat starch",
+      "ble",
+      "blé",
+      "farine de ble",
+      "farine de blé",
+      "trigo",
+      "frumento",
+      "farina di frumento",
     ],
     note: "Weizen ist glutenhaltig.",
   },
@@ -42,12 +110,18 @@ const GLUTEN_RULES = [
     terms: [
       "gerste",
       "gerstenmalz",
+      "gerstenmalzextrakt",
+      "gerstenmalzmehl",
       "malzextrakt",
       "malzessig",
       "barley",
       "barley malt",
       "malt extract",
       "malted barley",
+      "orge",
+      "cebada",
+      "orzo",
+      "malto d orzo",
     ],
     note: "Gerste und Gerstenmalz sind glutenhaltig.",
   },
@@ -55,7 +129,7 @@ const GLUTEN_RULES = [
     id: "rye",
     label: "Roggen",
     severity: "danger",
-    terms: ["roggen", "roggenmehl", "rye", "rye flour"],
+    terms: ["roggen", "roggenmehl", "rye", "rye flour", "seigle", "centeno", "segale"],
     note: "Roggen ist glutenhaltig.",
   },
   {
@@ -66,6 +140,9 @@ const GLUTEN_RULES = [
       "dinkel",
       "dinkelmehl",
       "spelt",
+      "epeautre",
+      "épeautre",
+      "espelta",
       "kamut",
       "khorasan",
       "emmer",
@@ -94,6 +171,7 @@ const GLUTEN_RULES = [
 const SAFE_PHRASES = [
   "glutenfrei",
   "gluten free",
+  "gluten-free",
   "ohne gluten",
   "free from gluten",
   "sans gluten",
@@ -109,12 +187,15 @@ const TRACE_PATTERNS = [
   "kann spuren von gluten enthalten",
   "kann spuren von weizen enthalten",
   "kann spuren von gerste enthalten",
+  "kann spuren von roggen enthalten",
   "may contain gluten",
   "may contain wheat",
   "may contain barley",
+  "may contain rye",
   "spuren von gluten",
   "spuren von weizen",
   "spuren von gerste",
+  "spuren von roggen",
 ];
 
 const els = {
@@ -123,6 +204,7 @@ const els = {
   captureCanvas: document.querySelector("#captureCanvas"),
   cameraEmpty: document.querySelector("#cameraEmpty"),
   cameraStage: document.querySelector(".camera-stage"),
+  scanFrame: document.querySelector(".scan-frame"),
   cameraStatus: document.querySelector("#cameraStatus"),
   cameraButton: document.querySelector("#cameraButton"),
   modelButton: document.querySelector("#modelButton"),
@@ -146,6 +228,7 @@ const els = {
   analyzeManualButton: document.querySelector("#analyzeManualButton"),
   clearTextButton: document.querySelector("#clearTextButton"),
   copyTextButton: document.querySelector("#copyTextButton"),
+  scanProfileSelect: document.querySelector("#scanProfileSelect"),
   intervalSelect: document.querySelector("#intervalSelect"),
   modelSelect: document.querySelector("#modelSelect"),
   autoCopyToggle: document.querySelector("#autoCopyToggle"),
@@ -161,6 +244,7 @@ const state = {
   busy: false,
   stream: null,
   loopTimer: null,
+  pendingScanAfterLoad: false,
   lastText: "",
   lastMatches: [],
 };
@@ -193,6 +277,11 @@ function bindEvents() {
   });
   els.copyTextButton.addEventListener("click", copyRecognizedText);
 
+  els.scanProfileSelect.addEventListener("change", () => {
+    state.settings.scanProfile = els.scanProfileSelect.value;
+    saveSettings();
+    applyScanProfileFrame();
+  });
   els.intervalSelect.addEventListener("change", () => {
     state.settings.intervalMs = Number(els.intervalSelect.value);
     saveSettings();
@@ -207,8 +296,8 @@ function bindEvents() {
     state.workerReady = false;
     destroyWorker();
     saveSettings();
-    setRuntimeStatus("Modell nicht geladen", "neutral");
-    setProgress(0, "Modell wartet", "Das ausgewählte OCR-Modell ist noch nicht vorbereitet.");
+    setRuntimeStatus("OCR nicht geladen", "neutral");
+    setProgress(0, "OCR wartet", "Die ausgewählte OCR-Methode ist noch nicht vorbereitet.");
   });
   els.autoCopyToggle.addEventListener("change", () => {
     state.settings.autoCopy = els.autoCopyToggle.checked;
@@ -235,9 +324,36 @@ function saveSettings() {
 
 function applySettingsToControls() {
   els.intervalSelect.value = String(state.settings.intervalMs);
-  els.modelSelect.value = state.settings.modelId;
+  if (!SCAN_PROFILES[state.settings.scanProfile]) {
+    state.settings.scanProfile = DEFAULT_SCAN_PROFILE;
+    saveSettings();
+  }
+  els.scanProfileSelect.value = state.settings.scanProfile;
+  applyScanProfileFrame();
+
+  if ([...els.modelSelect.options].some((option) => option.value === state.settings.modelId)) {
+    els.modelSelect.value = state.settings.modelId;
+  } else {
+    state.settings.modelId = DEFAULT_MODEL_ID;
+    els.modelSelect.value = DEFAULT_MODEL_ID;
+    saveSettings();
+  }
   els.autoCopyToggle.checked = state.settings.autoCopy;
   els.strictTraceToggle.checked = state.settings.strictTrace;
+}
+
+function applyScanProfileFrame() {
+  const profile = getCurrentScanProfile();
+  const { x, y, width, height } = profile.frame;
+  const top = y * 100;
+  const right = (1 - x - width) * 100;
+  const bottom = (1 - y - height) * 100;
+  const left = x * 100;
+  els.scanFrame.style.inset = `${top}% ${right}% ${bottom}% ${left}%`;
+}
+
+function getCurrentScanProfile() {
+  return SCAN_PROFILES[state.settings.scanProfile] || SCAN_PROFILES[DEFAULT_SCAN_PROFILE];
 }
 
 async function registerServiceWorker() {
@@ -295,9 +411,11 @@ async function startCamera() {
         facingMode: { ideal: "environment" },
         width: { ideal: 1920 },
         height: { ideal: 1080 },
+        frameRate: { ideal: 30, max: 30 },
       },
       audio: false,
     });
+    await tuneCameraTrack(state.stream);
     els.cameraVideo.srcObject = state.stream;
     els.cameraStage.classList.add("has-stream");
     els.cameraButton.querySelector("span").textContent = "Kamera aus";
@@ -308,6 +426,35 @@ async function startCamera() {
     setCameraStatus("Kamera-Zugriff abgelehnt");
     setResultNotice("unknown", "Kamera blockiert", "Prüfe Browser-Berechtigung oder nutze die manuelle Prüfung.");
     return false;
+  }
+}
+
+async function tuneCameraTrack(stream) {
+  const [track] = stream.getVideoTracks();
+  if (!track?.applyConstraints) {
+    return;
+  }
+
+  const capabilities = track.getCapabilities?.() || {};
+  const advanced = [];
+  if (capabilities.focusMode?.includes("continuous")) {
+    advanced.push({ focusMode: "continuous" });
+  }
+  if (capabilities.exposureMode?.includes("continuous")) {
+    advanced.push({ exposureMode: "continuous" });
+  }
+  if (capabilities.whiteBalanceMode?.includes("continuous")) {
+    advanced.push({ whiteBalanceMode: "continuous" });
+  }
+
+  if (!advanced.length) {
+    return;
+  }
+
+  try {
+    await track.applyConstraints({ advanced });
+  } catch (error) {
+    console.warn("Camera tuning failed", error);
   }
 }
 
@@ -337,8 +484,8 @@ async function ensureModelReady() {
   }
 
   state.loadingModel = true;
-  setRuntimeStatus("Modell lädt", "warn");
-  setProgress(4, "Modell lädt", "Transformers.js startet im Web Worker.");
+  setRuntimeStatus("OCR lädt", "warn");
+  setProgress(4, "OCR lädt", "Die Texterkennung startet im Web Worker.");
   els.modelButton.disabled = true;
 
   try {
@@ -359,7 +506,7 @@ function getWorker() {
     return state.worker;
   }
 
-  state.worker = new Worker("./ocr-worker.js", { type: "module" });
+  state.worker = new Worker(`./ocr-worker.js?v=${APP_VERSION}`, { type: "module" });
   state.worker.addEventListener("message", handleWorkerMessage);
   state.worker.addEventListener("error", (event) => {
     console.error("Worker error", event.message);
@@ -382,6 +529,7 @@ function destroyWorker() {
   state.modelReady = false;
   state.loadingModel = false;
   state.busy = false;
+  state.pendingScanAfterLoad = false;
 }
 
 async function handleWorkerMessage(event) {
@@ -398,15 +546,22 @@ async function handleWorkerMessage(event) {
     state.loadingModel = false;
     els.modelButton.disabled = false;
     const storageNote = await requestPersistentStorage();
-    setRuntimeStatus("Modell offline bereit", "ready");
-    setProgress(100, "Modell bereit", `${payload.modelId} ist im Browser verfügbar.${storageNote}`);
+    setRuntimeStatus("OCR offline bereit", "ready");
+    setProgress(100, "OCR bereit", `${payload.modelId} ist im Browser verfügbar.${storageNote}`);
+    if (state.pendingScanAfterLoad) {
+      state.pendingScanAfterLoad = false;
+      window.setTimeout(() => scanCameraFrame(), 0);
+    }
     return;
   }
 
   if (type === "result") {
     state.busy = false;
     setBusy(false);
-    setRuntimeStatus("Modell offline bereit", "ready");
+    setRuntimeStatus(
+      payload.durationMs ? `OCR ${formatDuration(payload.durationMs)}` : "OCR offline bereit",
+      "ready",
+    );
     const text = payload.text?.trim() || "";
     updateLastScanTime();
     analyzeAndRender(text, "ocr");
@@ -419,6 +574,7 @@ async function handleWorkerMessage(event) {
   if (type === "error") {
     state.loadingModel = false;
     state.busy = false;
+    state.pendingScanAfterLoad = false;
     els.modelButton.disabled = false;
     setBusy(false);
     setRuntimeStatus("OCR-Fehler", "danger");
@@ -446,13 +602,14 @@ async function scanCameraFrame() {
   }
 
   if (!state.modelReady) {
+    state.pendingScanAfterLoad = true;
     await ensureModelReady();
-    setResultNotice("unknown", "Modell wird vorbereitet", "Der erste Scan startet, sobald das OCR-Modell geladen ist.");
+    setResultNotice("unknown", "OCR wird vorbereitet", "Der erste Scan startet, sobald die Texterkennung geladen ist.");
     return;
   }
 
-  const blob = await captureScanBlob();
-  if (!blob) {
+  const capture = await captureScanImage();
+  if (!capture?.blob) {
     setResultNotice("unknown", "Kein Kamerabild", "Die Kamera liefert noch kein stabiles Bild.");
     return;
   }
@@ -460,35 +617,245 @@ async function scanCameraFrame() {
   state.busy = true;
   setBusy(true);
   setRuntimeStatus("OCR läuft", "warn");
-  getWorker().postMessage({ type: "scan", image: blob });
+  getWorker().postMessage({ type: "scan", image: capture.blob, options: capture.options });
 }
 
-async function captureScanBlob() {
+async function captureScanImage() {
   const video = els.cameraVideo;
   if (!video.videoWidth || !video.videoHeight) {
     return null;
   }
 
-  const sourceWidth = video.videoWidth;
-  const sourceHeight = video.videoHeight;
-  const cropWidth = Math.round(sourceWidth * 0.82);
-  const cropHeight = Math.round(sourceHeight * 0.48);
-  const cropX = Math.round((sourceWidth - cropWidth) / 2);
-  const cropY = Math.round((sourceHeight - cropHeight) / 2);
-
-  const targetWidth = 1280;
-  const targetHeight = Math.round((cropHeight / cropWidth) * targetWidth);
+  const profile = getCurrentScanProfile();
+  const crop = getVisibleScanCrop(video, els.scanFrame, profile);
+  const targetWidth = getTargetScanWidth(crop, profile, Boolean(state.loopTimer));
+  const targetHeight = Math.round((crop.height / crop.width) * targetWidth);
   const canvas = els.captureCanvas;
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
+  canvas.width = targetWidth + OCR_CANVAS_PADDING * 2;
+  canvas.height = targetHeight + OCR_CANVAS_PADDING * 2;
 
   const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
   context.save();
-  context.filter = "grayscale(1) contrast(1.28) brightness(1.06)";
-  context.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, targetWidth, targetHeight);
+  context.filter = `grayscale(1) contrast(${profile.contrast}) brightness(${profile.brightness})`;
+  context.drawImage(
+    video,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    OCR_CANVAS_PADDING,
+    OCR_CANVAS_PADDING,
+    targetWidth,
+    targetHeight,
+  );
   context.restore();
+  normalizeScanImage(context, canvas.width, canvas.height, profile);
 
-  return new Promise((resolve) => canvas.toBlob(resolve, "image/png", 0.92));
+  const blob = await canvasToBlob(canvas);
+  return {
+    blob,
+    options: {
+      scanProfile: state.settings.scanProfile,
+      psm: profile.psm,
+      fallbackPsm: profile.fallbackPsm,
+      minTextLength: profile.minTextLength,
+      minConfidence: profile.minConfidence,
+    },
+  };
+}
+
+function getTargetScanWidth(crop, profile, isLiveScan) {
+  const maxWidth = isLiveScan ? profile.liveTargetWidth : profile.targetWidth;
+  return Math.min(maxWidth, Math.max(profile.minTargetWidth, Math.round(crop.width)));
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+function getVisibleScanCrop(video, frame, profile) {
+  const fallback = getFallbackCrop(video, profile);
+  if (!frame) {
+    return fallback;
+  }
+
+  const videoRect = video.getBoundingClientRect();
+  const frameRect = frame.getBoundingClientRect();
+  if (!videoRect.width || !videoRect.height || !frameRect.width || !frameRect.height) {
+    return fallback;
+  }
+
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+  const sourceAspect = sourceWidth / sourceHeight;
+  const viewAspect = videoRect.width / videoRect.height;
+  let renderedWidth = videoRect.width;
+  let renderedHeight = videoRect.height;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  if (sourceAspect > viewAspect) {
+    renderedWidth = videoRect.height * sourceAspect;
+    offsetX = (videoRect.width - renderedWidth) / 2;
+  } else {
+    renderedHeight = videoRect.width / sourceAspect;
+    offsetY = (videoRect.height - renderedHeight) / 2;
+  }
+
+  const frameLeft = frameRect.left - videoRect.left - offsetX;
+  const frameTop = frameRect.top - videoRect.top - offsetY;
+  const scaleX = sourceWidth / renderedWidth;
+  const scaleY = sourceHeight / renderedHeight;
+
+  const crop = {
+    x: frameLeft * scaleX,
+    y: frameTop * scaleY,
+    width: frameRect.width * scaleX,
+    height: frameRect.height * scaleY,
+  };
+
+  return clampCrop(crop, sourceWidth, sourceHeight);
+}
+
+function getFallbackCrop(video, profile = getCurrentScanProfile()) {
+  const frame = profile.frame;
+  return {
+    x: Math.round(video.videoWidth * frame.x),
+    y: Math.round(video.videoHeight * frame.y),
+    width: Math.round(video.videoWidth * frame.width),
+    height: Math.round(video.videoHeight * frame.height),
+  };
+}
+
+function clampCrop(crop, sourceWidth, sourceHeight) {
+  const x = Math.max(0, Math.min(sourceWidth - 1, Math.round(crop.x)));
+  const y = Math.max(0, Math.min(sourceHeight - 1, Math.round(crop.y)));
+  const width = Math.max(1, Math.min(sourceWidth - x, Math.round(crop.width)));
+  const height = Math.max(1, Math.min(sourceHeight - y, Math.round(crop.height)));
+  return { x, y, width, height };
+}
+
+function normalizeScanImage(context, width, height, profile) {
+  const image = context.getImageData(0, 0, width, height);
+  const data = image.data;
+  const pixels = width * height;
+  const luminance = new Uint8Array(pixels);
+  let total = 0;
+
+  for (let i = 0, pixel = 0; i < data.length; i += 4, pixel += 1) {
+    const value = Math.round(data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+    luminance[pixel] = value;
+    total += value;
+  }
+
+  const invert = total / pixels < 118;
+  const histogram = new Uint32Array(256);
+  for (let pixel = 0; pixel < luminance.length; pixel += 1) {
+    if (invert) {
+      luminance[pixel] = 255 - luminance[pixel];
+    }
+    histogram[luminance[pixel]] += 1;
+  }
+
+  stretchLuminance(luminance, histogram, pixels);
+  const binary = adaptiveThreshold(luminance, width, height, profile);
+  for (let i = 0, pixel = 0; i < data.length; i += 4, pixel += 1) {
+    const value = binary[pixel];
+    data[i] = value;
+    data[i + 1] = value;
+    data[i + 2] = value;
+    data[i + 3] = 255;
+  }
+
+  context.putImageData(image, 0, 0);
+}
+
+function stretchLuminance(luminance, histogram, pixels) {
+  const low = getHistogramPercentile(histogram, pixels, 0.02);
+  const high = getHistogramPercentile(histogram, pixels, 0.985);
+  if (high - low < 24) {
+    return;
+  }
+
+  const scale = 255 / (high - low);
+  for (let i = 0; i < luminance.length; i += 1) {
+    luminance[i] = clampByte((luminance[i] - low) * scale);
+  }
+}
+
+function getHistogramPercentile(histogram, totalPixels, percentile) {
+  const target = totalPixels * percentile;
+  let seen = 0;
+  for (let value = 0; value < histogram.length; value += 1) {
+    seen += histogram[value];
+    if (seen >= target) {
+      return value;
+    }
+  }
+  return histogram.length - 1;
+}
+
+function adaptiveThreshold(luminance, width, height, profile) {
+  const integralWidth = width + 1;
+  const integral = new Uint32Array((width + 1) * (height + 1));
+  const integralSq = new Float64Array((width + 1) * (height + 1));
+
+  for (let y = 1; y <= height; y += 1) {
+    let rowSum = 0;
+    let rowSq = 0;
+    for (let x = 1; x <= width; x += 1) {
+      const value = luminance[(y - 1) * width + x - 1];
+      rowSum += value;
+      rowSq += value * value;
+      const index = y * integralWidth + x;
+      const above = index - integralWidth;
+      integral[index] = integral[above] + rowSum;
+      integralSq[index] = integralSq[above] + rowSq;
+    }
+  }
+
+  const binary = new Uint8Array(width * height);
+  const radius = Math.max(12, Math.round(Math.min(width, height) * profile.adaptiveRadiusRatio));
+  const thresholdBias = profile.thresholdBias;
+  const sauvolaK = 0.24;
+
+  for (let y = 0; y < height; y += 1) {
+    const y1 = Math.max(0, y - radius);
+    const y2 = Math.min(height - 1, y + radius);
+    for (let x = 0; x < width; x += 1) {
+      const x1 = Math.max(0, x - radius);
+      const x2 = Math.min(width - 1, x + radius);
+      const area = (x2 - x1 + 1) * (y2 - y1 + 1);
+      const sum = getIntegralSum(integral, integralWidth, x1, y1, x2, y2);
+      const sumSq = getIntegralSum(integralSq, integralWidth, x1, y1, x2, y2);
+      const mean = sum / area;
+      const variance = Math.max(0, sumSq / area - mean * mean);
+      const stddev = Math.sqrt(variance);
+      const threshold = mean * (1 + sauvolaK * (stddev / 128 - 1)) - thresholdBias;
+      binary[y * width + x] = luminance[y * width + x] > threshold ? 255 : 0;
+    }
+  }
+
+  return binary;
+}
+
+function getIntegralSum(integral, integralWidth, x1, y1, x2, y2) {
+  const left = x1;
+  const top = y1;
+  const right = x2 + 1;
+  const bottom = y2 + 1;
+  return (
+    integral[bottom * integralWidth + right] -
+    integral[top * integralWidth + right] -
+    integral[bottom * integralWidth + left] +
+    integral[top * integralWidth + left]
+  );
+}
+
+function clampByte(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
 }
 
 function toggleLoopScan() {
@@ -533,6 +900,13 @@ function updateLastScanTime() {
   });
 }
 
+function formatDuration(durationMs) {
+  if (durationMs < 1000) {
+    return `${durationMs} ms`;
+  }
+  return `${(durationMs / 1000).toFixed(1).replace(".", ",")} s`;
+}
+
 function analyzeAndRender(text, source) {
   const result = analyzeIngredients(text);
   state.lastText = text;
@@ -542,17 +916,14 @@ function analyzeAndRender(text, source) {
 
 function analyzeIngredients(rawText) {
   const normalized = normalizeText(rawText);
-  const safeHits = SAFE_PHRASES.filter((phrase) => normalized.includes(normalizeText(phrase)));
-  let scanText = normalized;
-  for (const phrase of SAFE_PHRASES) {
-    scanText = scanText.replaceAll(normalizeText(phrase), " ");
-  }
+  const safeHits = findPhraseHits(SAFE_PHRASES, normalized);
+  const scanText = stripPhrases(normalized, SAFE_PHRASES);
 
   const matches = [];
-  const traceHits = TRACE_PATTERNS.filter((pattern) => normalized.includes(normalizeText(pattern)));
+  const traceHits = findPhraseHits(TRACE_PATTERNS, normalized);
 
   for (const rule of GLUTEN_RULES) {
-    const terms = rule.terms.filter((term) => scanText.includes(normalizeText(term)));
+    const terms = findIngredientTerms(rule.terms, scanText);
     if (terms.length) {
       matches.push({ ...rule, terms: [...new Set(terms)] });
     }
@@ -641,6 +1012,121 @@ function normalizeText(value) {
     .replace(/[^\p{L}\p{N}\s-]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function findPhraseHits(phrases, normalizedText) {
+  const foldedText = foldOcrConfusions(normalizedText);
+  return phrases.filter((phrase) => {
+    const normalizedPhrase = normalizeText(phrase);
+    const foldedPhrase = foldOcrConfusions(normalizedPhrase);
+    return normalizedText.includes(normalizedPhrase) || foldedText.includes(foldedPhrase);
+  });
+}
+
+function stripPhrases(normalizedText, phrases) {
+  let text = ` ${normalizedText} `;
+  for (const phrase of phrases) {
+    const normalizedPhrase = normalizeText(phrase);
+    text = text.replaceAll(` ${normalizedPhrase} `, " ");
+    text = text.replaceAll(normalizedPhrase, " ");
+  }
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function findIngredientTerms(terms, scanText) {
+  const foldedText = foldOcrConfusions(scanText);
+  return terms.filter((term) => {
+    const normalizedTerm = normalizeText(term);
+    const foldedTerm = foldOcrConfusions(normalizedTerm);
+    return (
+      containsIngredientTerm(scanText, normalizedTerm) ||
+      containsIngredientTerm(foldedText, foldedTerm) ||
+      isApproximateTermHit(foldedText, foldedTerm)
+    );
+  });
+}
+
+function containsIngredientTerm(text, term) {
+  if (!term) {
+    return false;
+  }
+
+  if (term === "gluten") {
+    return /(^|\s|-)gluten($|\s|-)/u.test(text);
+  }
+
+  if (!term.includes(" ") && term.length <= 4) {
+    const pattern = new RegExp(`(^|\\s|-)${escapeRegExp(term)}($|\\s|-)`, "u");
+    return pattern.test(text);
+  }
+
+  return text.includes(term);
+}
+
+function foldOcrConfusions(value) {
+  return String(value || "")
+    .replace(/[0]/g, "o")
+    .replace(/[1!|]/g, "i")
+    .replace(/[3]/g, "e")
+    .replace(/[4]/g, "a")
+    .replace(/[5$]/g, "s")
+    .replace(/[7]/g, "t")
+    .replace(/[8]/g, "b")
+    .replace(/\brn/g, "m")
+    .replace(/vv/g, "w");
+}
+
+function isApproximateTermHit(text, term) {
+  if (!term || term.length < 5 || term.includes(" ")) {
+    return false;
+  }
+
+  const maxDistance = term.length <= 6 ? 1 : 2;
+  const tokens = text.split(/\s+/).map((token) => token.replace(/-/g, ""));
+  for (const token of tokens) {
+    if (token.length < Math.max(4, term.length - maxDistance)) {
+      continue;
+    }
+    if (levenshteinWithin(token, term, maxDistance)) {
+      return true;
+    }
+    if (token.length > term.length) {
+      for (let index = 0; index <= token.length - term.length; index += 1) {
+        if (levenshteinWithin(token.slice(index, index + term.length), term, maxDistance)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function levenshteinWithin(left, right, maxDistance) {
+  if (Math.abs(left.length - right.length) > maxDistance) {
+    return false;
+  }
+
+  let previous = Array.from({ length: right.length + 1 }, (_value, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    let rowBest = current[0];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      const cost = Math.min(
+        previous[rightIndex] + 1,
+        current[rightIndex - 1] + 1,
+        previous[rightIndex - 1] + substitutionCost,
+      );
+      current[rightIndex] = cost;
+      rowBest = Math.min(rowBest, cost);
+    }
+    if (rowBest > maxDistance) {
+      return false;
+    }
+    previous = current;
+  }
+
+  return previous[right.length] <= maxDistance;
 }
 
 function dedupeMatches(matches) {

@@ -318,6 +318,7 @@ h3 {
   box-shadow:
     0 0 0 999px rgba(0, 0, 0, 0.16),
     inset 0 0 0 1px rgba(15, 118, 110, 0.26);
+  transition: inset 180ms ease;
   pointer-events: none;
 }
 

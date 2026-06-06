@@ -1,5 +1,5 @@
-const APP_CACHE = "zoli-scan-app-v2";
-const RUNTIME_CACHE = "zoli-scan-runtime-v2";
+const APP_CACHE = "zoli-scan-app-v6";
+const RUNTIME_CACHE = "zoli-scan-runtime-v6";
 
 const APP_ASSETS = [
   "./",
@@ -20,6 +20,7 @@ const CACHEABLE_HOSTS = new Set([
   "hf.co",
   "cas-bridge.xethub.hf.co",
   "cdn-lfs.huggingface.co",
+  "tessdata.projectnaptha.com",
 ]);
 
 self.addEventListener("install", (event) => {
