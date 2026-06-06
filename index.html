@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f766e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Zöli-Scan" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="format-detection" content="telephone=no" />
+    <title>Zöli-Scan</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <svg aria-hidden="true" class="symbol-sprite">
+      <symbol id="icon-alert" viewBox="0 0 24 24">
+        <path d="M10.3 3.6 1.8 18.2A2.3 2.3 0 0 0 3.8 21h16.4a2.3 2.3 0 0 0 2-2.8L13.7 3.6a2 2 0 0 0-3.4 0Z" />
+        <path d="M12 8v5" />
+        <path d="M12 17h.01" />
+      </symbol>
+      <symbol id="icon-camera" viewBox="0 0 24 24">
+        <path d="M14.5 4.5 16 7h3a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3l1.5-2.5h5Z" />
+        <circle cx="12" cy="13" r="3.5" />
+      </symbol>
+      <symbol id="icon-check" viewBox="0 0 24 24">
+        <path d="m20 6-11 11-5-5" />
+      </symbol>
+      <symbol id="icon-download" viewBox="0 0 24 24">
+        <path d="M12 3v12" />
+        <path d="m7 10 5 5 5-5" />
+        <path d="M5 21h14" />
+      </symbol>
+      <symbol id="icon-pause" viewBox="0 0 24 24">
+        <path d="M8 5v14" />
+        <path d="M16 5v14" />
+      </symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24">
+        <path d="M8 5v14l11-7Z" />
+      </symbol>
+      <symbol id="icon-refresh" viewBox="0 0 24 24">
+        <path d="M21 12a9 9 0 0 1-15.3 6.4" />
+        <path d="M3 12A9 9 0 0 1 18.3 5.6" />
+        <path d="M18 2v4h-4" />
+        <path d="M6 22v-4h4" />
+      </symbol>
+      <symbol id="icon-scan" viewBox="0 0 24 24">
+        <path d="M4 7V5a1 1 0 0 1 1-1h2" />
+        <path d="M17 4h2a1 1 0 0 1 1 1v2" />
+        <path d="M20 17v2a1 1 0 0 1-1 1h-2" />
+        <path d="M7 20H5a1 1 0 0 1-1-1v-2" />
+        <path d="M7 12h10" />
+      </symbol>
+      <symbol id="icon-settings" viewBox="0 0 24 24">
+        <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+        <path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1a2.1 2.1 0 1 1-3 3l-.1-.1a1.8 1.8 0 0 0-2-.4 1.8 1.8 0 0 0-1 1.6v.3a2.1 2.1 0 1 1-4.2 0v-.2a1.8 1.8 0 0 0-1.2-1.7 1.8 1.8 0 0 0-2 .4l-.1.1a2.1 2.1 0 1 1-3-3l.1-.1a1.8 1.8 0 0 0 .4-2 1.8 1.8 0 0 0-1.6-1H2a2.1 2.1 0 1 1 0-4.2h.2a1.8 1.8 0 0 0 1.7-1.2 1.8 1.8 0 0 0-.4-2l-.1-.1a2.1 2.1 0 1 1 3-3l.1.1a1.8 1.8 0 0 0 2 .4h.1a1.8 1.8 0 0 0 1-1.6V2a2.1 2.1 0 1 1 4.2 0v.2a1.8 1.8 0 0 0 1 1.6 1.8 1.8 0 0 0 2-.4l.1-.1a2.1 2.1 0 1 1 3 3l-.1.1a1.8 1.8 0 0 0-.4 2v.1a1.8 1.8 0 0 0 1.6 1h.3a2.1 2.1 0 1 1 0 4.2h-.2a1.8 1.8 0 0 0-1.7 1.3Z" />
+      </symbol>
+      <symbol id="icon-shield" viewBox="0 0 24 24">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+        <path d="m9 12 2 2 4-5" />
+      </symbol>
+      <symbol id="icon-text" viewBox="0 0 24 24">
+        <path d="M4 6h16" />
+        <path d="M8 6v12" />
+        <path d="M16 6v12" />
+        <path d="M6 18h4" />
+        <path d="M14 18h4" />
+      </symbol>
+    </svg>
+
+    <header class="app-topbar">
+      <a class="brand" href="./" aria-label="Zöli-Scan Start">
+        <span class="brand-mark"><svg><use href="#icon-shield"></use></svg></span>
+        <span>Zöli-Scan</span>
+      </a>
+      <div class="runtime-strip" aria-live="polite">
+        <span id="connectionBadge" class="status-badge status-badge--neutral">Netzwerk wird geprüft</span>
+        <span id="runtimeStatus" class="status-badge status-badge--neutral">Modell nicht geladen</span>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <section class="scanner-panel" aria-labelledby="scannerTitle">
+        <div class="section-heading">
+          <div>
+            <h1 id="scannerTitle">Zutaten scannen</h1>
+            <p>OCR und Gluten-Prüfung laufen lokal in diesem Browser.</p>
+          </div>
+          <span id="lastScanTime" class="subtle-label">Noch kein Scan</span>
+        </div>
+
+        <div class="camera-stage">
+          <video id="cameraVideo" autoplay muted playsinline></video>
+          <canvas id="captureCanvas" hidden></canvas>
+          <div id="cameraEmpty" class="camera-empty">
+            <svg><use href="#icon-camera"></use></svg>
+            <span>Kamera bereitstellen</span>
+          </div>
+          <div class="scan-frame" aria-hidden="true">
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <div class="stage-footer">
+            <span id="cameraStatus">Kamera ist aus</span>
+            <span id="scanModeLabel">Einzelbild</span>
+          </div>
+        </div>
+
+        <div class="primary-actions">
+          <button id="cameraButton" class="button button--secondary" type="button">
+            <svg><use href="#icon-camera"></use></svg>
+            <span>Kamera</span>
+          </button>
+          <button id="modelButton" class="button button--secondary" type="button">
+            <svg><use href="#icon-download"></use></svg>
+            <span>Modell vorbereiten</span>
+          </button>
+          <button id="scanButton" class="button button--primary" type="button">
+            <svg><use href="#icon-scan"></use></svg>
+            <span>Jetzt scannen</span>
+          </button>
+          <button id="loopButton" class="button button--secondary" type="button" aria-pressed="false">
+            <svg><use href="#icon-play"></use></svg>
+            <span>Live-Scan</span>
+          </button>
+        </div>
+
+        <div class="progress-row">
+          <div>
+            <strong id="modelProgressLabel">Modell wartet</strong>
+            <span id="modelProgressDetail">Beim ersten Start werden Transformers.js und TrOCR in den Browser geladen.</span>
+          </div>
+          <progress id="modelProgress" value="0" max="100"></progress>
+        </div>
+      </section>
+
+      <aside id="resultPanel" class="result-panel result-panel--unknown" aria-live="polite">
+        <div class="result-summary">
+          <div id="resultIcon" class="result-icon"><svg><use href="#icon-refresh"></use></svg></div>
+          <div>
+            <p class="subtle-label">Scan-Ergebnis</p>
+            <h2 id="resultTitle">Bereit zum Prüfen</h2>
+            <p id="resultMessage">Starte Kamera und Modell, oder füge Zutaten manuell ein.</p>
+          </div>
+        </div>
+
+        <div class="match-section">
+          <div class="panel-heading">
+            <h3>Treffer</h3>
+            <span id="matchCount" class="subtle-label">0</span>
+          </div>
+          <div id="matchesList" class="matches-list">
+            <span class="empty-pill">Keine Treffer</span>
+          </div>
+        </div>
+
+        <div class="text-section">
+          <div class="panel-heading">
+            <h3>Erkannter Text</h3>
+            <button id="copyTextButton" class="icon-button" type="button" title="Text kopieren" aria-label="Text kopieren">
+              <svg><use href="#icon-text"></use></svg>
+            </button>
+          </div>
+          <div id="highlightedText" class="highlighted-text">Noch kein OCR-Text.</div>
+        </div>
+      </aside>
+
+      <section class="manual-panel" aria-labelledby="manualTitle">
+        <div class="panel-heading">
+          <div>
+            <h2 id="manualTitle">Manuelle Prüfung</h2>
+            <p>Für unscharfe Fotos oder Verpackungen ohne gute Beleuchtung.</p>
+          </div>
+          <button id="clearTextButton" class="icon-button" type="button" title="Text löschen" aria-label="Text löschen">
+            <svg><use href="#icon-refresh"></use></svg>
+          </button>
+        </div>
+        <textarea id="manualText" spellcheck="false" placeholder="Zutaten: Reismehl, Maisstärke, Zucker ..."></textarea>
+        <div class="manual-actions">
+          <button id="analyzeManualButton" class="button button--primary" type="button">
+            <svg><use href="#icon-check"></use></svg>
+            <span>Text prüfen</span>
+          </button>
+          <p class="fine-print">Hinweis: Die App ersetzt keine medizinische Beratung und kann OCR-Fehler nicht ausschließen.</p>
+        </div>
+      </section>
+
+      <section class="settings-panel" aria-labelledby="settingsTitle">
+        <div class="panel-heading">
+          <div>
+            <h2 id="settingsTitle">Scan-Einstellungen</h2>
+            <p>Lokale Einstellungen werden nur im Browser gespeichert.</p>
+          </div>
+          <svg class="heading-icon"><use href="#icon-settings"></use></svg>
+        </div>
+
+        <div class="settings-grid">
+          <label class="field">
+            <span>Live-Intervall</span>
+            <select id="intervalSelect">
+              <option value="2500">2,5 Sekunden</option>
+              <option value="4000">4 Sekunden</option>
+              <option value="6500">6,5 Sekunden</option>
+              <option value="10000">10 Sekunden</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>OCR-Modell</span>
+            <select id="modelSelect">
+              <option value="Xenova/trocr-small-printed">TrOCR small printed</option>
+              <option value="Xenova/trocr-base-printed">TrOCR base printed</option>
+            </select>
+          </label>
+          <label class="toggle-field">
+            <input id="autoCopyToggle" type="checkbox" />
+            <span>Erkannten Text in das manuelle Feld übernehmen</span>
+          </label>
+          <label class="toggle-field">
+            <input id="strictTraceToggle" type="checkbox" checked />
+            <span>Spurenhinweise als Warnung markieren</span>
+          </label>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

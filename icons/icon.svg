@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Zöli-Scan">
+  <rect width="128" height="128" rx="24" fill="#0f766e"/>
+  <path d="M64 21 98 34v31c0 26-34 42-34 42S30 91 30 65V34l34-13Z" fill="#ffffff" opacity=".96"/>
+  <path d="m50 64 10 10 22-28" fill="none" stroke="#0f766e" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M37 91h54" fill="none" stroke="#99f6e4" stroke-width="6" stroke-linecap="round"/>
+</svg>
