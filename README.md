@@ -6,7 +6,10 @@ Statische Offline-first Web App zum Scannen von Zutatenlisten. Die App nutzt die
 
 - Kein Backend, keine API, keine serverseitige Inferenz.
 - OCR laeuft in `ocr-worker.js` standardmaessig mit Tesseract.js fuer dichten Etiketttext.
+- Der Live-Scan sampelt bis zu 10 Kameraframes pro Sekunde, verteilt OCR-Jobs auf mehrere Tesseract-Worker und verwirft Frames, wenn alle Worker belegt sind, statt eine wachsende Warteschlange aufzubauen.
+- Live-Ergebnisse werden ueber ein kurzes Rolling-Fenster fusioniert: aehnliche Zeilen werden dedupliziert, bessere OCR-Varianten ersetzen schwaechere und neue Textfragmente bleiben erhalten, wenn eine runde Verpackung gedreht wird.
 - Fuer Dosen und Flaschen gibt es ein eigenes Scan-Profil mit engerem Kameraausschnitt, adaptiver Bildvorverarbeitung und OCR-Fallback bei schwachen Ergebnissen.
+- Der zweite OCR-Fallback-Pass bleibt fuer Einzelbilder aktiv, wird im Live-Modus aber uebersprungen, weil die Fusion mehrerer Frames die Gegenpruefung uebernimmt.
 - TrOCR (`Xenova/trocr-small-printed` / `Xenova/trocr-base-printed`) bleibt als Fallback auswaehlbar.
 - Beim ersten Modellstart werden OCR-WASM-Dateien und Sprach- bzw. Modellgewichte in den Browser-Cache geladen.
 - `sw.js` cached die App-Shell, PWA-Icons und runtime-nahe Ressourcen fuer spaetere Offline-Nutzung.

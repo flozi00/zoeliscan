@@ -1,8 +1,8 @@
 const STORAGE_KEY = "zoli-scan-settings";
-const APP_VERSION = "2026-06-06-ocr-v3";
+const APP_VERSION = "2026-06-07-live-ocr-v1";
 
 const DEFAULT_SETTINGS = {
-  intervalMs: 2500,
+  intervalMs: 100,
   modelId: "tesseract-deu",
   scanProfile: "curved-label",
   autoCopy: true,
@@ -12,11 +12,15 @@ const DEFAULT_SETTINGS = {
 const DEFAULT_MODEL_ID = "tesseract-deu";
 const DEFAULT_SCAN_PROFILE = "curved-label";
 const OCR_CANVAS_PADDING = 18;
+const LIVE_RESULT_WINDOW_MS = 9000;
+const LIVE_RESULT_MAX_FRAMES = 36;
+const LIVE_STATUS_UPDATE_MS = 500;
+const LIVE_TESSERACT_WORKER_LIMIT = getLiveTesseractWorkerLimit();
 const SCAN_PROFILES = {
   "curved-label": {
     frame: { x: 0.18, y: 0.08, width: 0.64, height: 0.78 },
     targetWidth: 1180,
-    liveTargetWidth: 940,
+    liveTargetWidth: 720,
     minTargetWidth: 760,
     contrast: 1.2,
     brightness: 1.05,
@@ -30,7 +34,7 @@ const SCAN_PROFILES = {
   ingredients: {
     frame: { x: 0.08, y: 0.16, width: 0.84, height: 0.66 },
     targetWidth: 1120,
-    liveTargetWidth: 900,
+    liveTargetWidth: 720,
     minTargetWidth: 720,
     contrast: 1.18,
     brightness: 1.05,
@@ -44,7 +48,7 @@ const SCAN_PROFILES = {
   "small-text": {
     frame: { x: 0.06, y: 0.08, width: 0.88, height: 0.82 },
     targetWidth: 1420,
-    liveTargetWidth: 1080,
+    liveTargetWidth: 860,
     minTargetWidth: 900,
     contrast: 1.24,
     brightness: 1.06,
@@ -237,14 +241,20 @@ const els = {
 
 const state = {
   settings: loadSettings(),
-  worker: null,
+  workerPool: [],
   workerReady: false,
   modelReady: false,
   loadingModel: false,
   busy: false,
+  startingCamera: false,
+  capturingFrame: false,
+  activeScans: 0,
+  scanSequence: 0,
   stream: null,
   loopTimer: null,
   pendingScanAfterLoad: false,
+  liveFusion: createLiveFusionState(),
+  liveStats: createLiveStats(),
   lastText: "",
   lastMatches: [],
 };
@@ -280,6 +290,7 @@ function bindEvents() {
   els.scanProfileSelect.addEventListener("change", () => {
     state.settings.scanProfile = els.scanProfileSelect.value;
     saveSettings();
+    resetLiveFusion();
     applyScanProfileFrame();
   });
   els.intervalSelect.addEventListener("change", () => {
@@ -295,6 +306,7 @@ function bindEvents() {
     state.modelReady = false;
     state.workerReady = false;
     destroyWorker();
+    resetLiveFusion();
     saveSettings();
     setRuntimeStatus("OCR nicht geladen", "neutral");
     setProgress(0, "OCR wartet", "Die ausgewählte OCR-Methode ist noch nicht vorbereitet.");
@@ -323,7 +335,14 @@ function saveSettings() {
 }
 
 function applySettingsToControls() {
-  els.intervalSelect.value = String(state.settings.intervalMs);
+  if ([...els.intervalSelect.options].some((option) => option.value === String(state.settings.intervalMs))) {
+    els.intervalSelect.value = String(state.settings.intervalMs);
+  } else {
+    state.settings.intervalMs = DEFAULT_SETTINGS.intervalMs;
+    els.intervalSelect.value = String(DEFAULT_SETTINGS.intervalMs);
+    saveSettings();
+  }
+
   if (!SCAN_PROFILES[state.settings.scanProfile]) {
     state.settings.scanProfile = DEFAULT_SCAN_PROFILE;
     saveSettings();
@@ -399,12 +418,21 @@ async function toggleCamera() {
 }
 
 async function startCamera() {
+  if (state.stream) {
+    return true;
+  }
+
+  if (state.startingCamera) {
+    return false;
+  }
+
   if (!navigator.mediaDevices?.getUserMedia) {
     setCameraStatus("Kamera-API nicht verfügbar");
     setResultNotice("unknown", "Kamera nicht verfügbar", "Nutze die manuelle Prüfung auf diesem Gerät.");
     return false;
   }
 
+  state.startingCamera = true;
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({
       video: {
@@ -426,6 +454,8 @@ async function startCamera() {
     setCameraStatus("Kamera-Zugriff abgelehnt");
     setResultNotice("unknown", "Kamera blockiert", "Prüfe Browser-Berechtigung oder nutze die manuelle Prüfung.");
     return false;
+  } finally {
+    state.startingCamera = false;
   }
 }
 
@@ -475,111 +505,173 @@ function setCameraStatus(text) {
   els.cameraStatus.textContent = text;
 }
 
-async function ensureModelReady() {
-  if (state.modelReady) {
+async function ensureModelReady(slot = getWorkerSlot(0)) {
+  if (isSlotReady(slot)) {
+    if (slot.index === 0) {
+      state.modelReady = true;
+    }
     return true;
   }
-  if (state.loadingModel) {
+  if (slot.loading) {
     return false;
   }
 
-  state.loadingModel = true;
-  setRuntimeStatus("OCR lädt", "warn");
-  setProgress(4, "OCR lädt", "Die Texterkennung startet im Web Worker.");
-  els.modelButton.disabled = true;
+  slot.loading = true;
+  slot.modelId = state.settings.modelId;
+  if (slot.index === 0) {
+    state.loadingModel = true;
+    setRuntimeStatus("OCR lädt", "warn");
+    setProgress(4, "OCR lädt", "Die Texterkennung startet im Web Worker.");
+    els.modelButton.disabled = true;
+  }
 
   try {
-    const worker = getWorker();
-    worker.postMessage({ type: "load", modelId: state.settings.modelId });
+    slot.worker.postMessage({ type: "load", modelId: state.settings.modelId });
     return false;
   } catch (error) {
-    state.loadingModel = false;
-    els.modelButton.disabled = false;
-    setRuntimeStatus("Modellfehler", "danger");
-    setProgress(0, "Modellfehler", error.message);
+    slot.loading = false;
+    if (slot.index === 0) {
+      state.loadingModel = false;
+      els.modelButton.disabled = false;
+      setRuntimeStatus("Modellfehler", "danger");
+      setProgress(0, "Modellfehler", error.message);
+    }
     return false;
   }
 }
 
-function getWorker() {
-  if (state.worker) {
-    return state.worker;
+function getWorkerSlot(index = 0) {
+  const existing = state.workerPool[index];
+  if (existing) {
+    return existing;
   }
 
-  state.worker = new Worker(`./ocr-worker.js?v=${APP_VERSION}`, { type: "module" });
-  state.worker.addEventListener("message", handleWorkerMessage);
-  state.worker.addEventListener("error", (event) => {
+  const slot = {
+    index,
+    worker: new Worker(`./ocr-worker.js?v=${APP_VERSION}`, { type: "module" }),
+    ready: false,
+    loading: false,
+    busy: false,
+    modelId: null,
+    requestId: null,
+    mode: null,
+  };
+  slot.worker.addEventListener("message", (event) => handleWorkerMessage(event, slot));
+  slot.worker.addEventListener("error", (event) => {
     console.error("Worker error", event.message);
-    state.loadingModel = false;
-    state.busy = false;
-    setBusy(false);
-    setRuntimeStatus("Workerfehler", "danger");
-    setProgress(0, "Workerfehler", event.message || "OCR-Worker konnte nicht starten.");
+    releaseWorkerSlot(slot);
+    slot.loading = false;
+    slot.ready = false;
+    if (slot.index === 0) {
+      state.loadingModel = false;
+      state.modelReady = false;
+      els.modelButton.disabled = false;
+      setRuntimeStatus("Workerfehler", "danger");
+      setProgress(0, "Workerfehler", event.message || "OCR-Worker konnte nicht starten.");
+    }
   });
-  return state.worker;
+  state.workerPool[index] = slot;
+  return slot;
 }
 
-function destroyWorker() {
-  if (!state.worker) {
-    return;
+function isSlotReady(slot) {
+  return slot?.ready && slot.modelId === state.settings.modelId;
+}
+
+function destroyWorkerPool() {
+  for (const slot of state.workerPool) {
+    if (!slot) {
+      continue;
+    }
+    slot.worker.postMessage({ type: "dispose" });
+    slot.worker.terminate();
   }
-  state.worker.postMessage({ type: "dispose" });
-  state.worker.terminate();
-  state.worker = null;
+  state.workerPool = [];
+  state.workerReady = false;
   state.modelReady = false;
   state.loadingModel = false;
   state.busy = false;
+  state.activeScans = 0;
+  state.capturingFrame = false;
   state.pendingScanAfterLoad = false;
+  setBusy(false);
 }
 
-async function handleWorkerMessage(event) {
-  const { type, payload } = event.data || {};
+function destroyWorker() {
+  destroyWorkerPool();
+}
+
+async function handleWorkerMessage(event, slot) {
+  const { type, payload, requestId } = event.data || {};
 
   if (type === "progress") {
+    if (slot.index !== 0 && state.modelReady) {
+      return;
+    }
     const progress = Math.max(5, Math.min(99, Math.round(payload.progress || 0)));
     setProgress(progress, payload.label || "Modell lädt", payload.detail || "Dateien werden im Browser-Cache gespeichert.");
     return;
   }
 
   if (type === "ready") {
-    state.modelReady = true;
-    state.loadingModel = false;
-    els.modelButton.disabled = false;
-    const storageNote = await requestPersistentStorage();
-    setRuntimeStatus("OCR offline bereit", "ready");
-    setProgress(100, "OCR bereit", `${payload.modelId} ist im Browser verfügbar.${storageNote}`);
-    if (state.pendingScanAfterLoad) {
-      state.pendingScanAfterLoad = false;
-      window.setTimeout(() => scanCameraFrame(), 0);
+    if (payload.id && payload.id !== state.settings.modelId) {
+      return;
+    }
+    slot.ready = true;
+    slot.loading = false;
+    slot.modelId = state.settings.modelId;
+    if (slot.index === 0) {
+      state.workerReady = true;
+      state.modelReady = true;
+      state.loadingModel = false;
+      els.modelButton.disabled = false;
+      const storageNote = await requestPersistentStorage();
+      setRuntimeStatus("OCR offline bereit", "ready");
+      setProgress(100, "OCR bereit", `${payload.modelId} ist im Browser verfügbar.${storageNote}`);
+      if (state.pendingScanAfterLoad) {
+        state.pendingScanAfterLoad = false;
+        window.setTimeout(() => scanCameraFrame(state.loopTimer ? "live" : "single"), 0);
+      }
+      if (state.loopTimer) {
+        warmLiveWorkerPool();
+      }
+    } else if (state.loopTimer) {
+      renderLiveScanStatus();
     }
     return;
   }
 
   if (type === "result") {
-    state.busy = false;
-    setBusy(false);
+    if (requestId && slot.requestId && requestId !== slot.requestId) {
+      return;
+    }
+    const wasLiveScan = slot.mode === "live";
+    releaseWorkerSlot(slot);
     setRuntimeStatus(
-      payload.durationMs ? `OCR ${formatDuration(payload.durationMs)}` : "OCR offline bereit",
+      getRuntimeResultLabel(payload.durationMs, wasLiveScan),
       "ready",
     );
     const text = payload.text?.trim() || "";
     updateLastScanTime();
-    analyzeAndRender(text, "ocr");
-    if (state.settings.autoCopy && text) {
-      els.manualText.value = text;
-    }
+    handleRecognizedText(text, payload, wasLiveScan);
     return;
   }
 
   if (type === "error") {
-    state.loadingModel = false;
-    state.busy = false;
-    state.pendingScanAfterLoad = false;
-    els.modelButton.disabled = false;
-    setBusy(false);
-    setRuntimeStatus("OCR-Fehler", "danger");
-    setProgress(0, "OCR-Fehler", payload.message || "Unbekannter Fehler.");
-    setResultNotice("unknown", "OCR nicht möglich", payload.message || "Nutze die manuelle Prüfung.");
+    releaseWorkerSlot(slot);
+    slot.loading = false;
+    slot.ready = false;
+    if (slot.index === 0) {
+      state.loadingModel = false;
+      state.modelReady = false;
+      state.pendingScanAfterLoad = false;
+      els.modelButton.disabled = false;
+      setRuntimeStatus("OCR-Fehler", "danger");
+      setProgress(0, "OCR-Fehler", payload.message || "Unbekannter Fehler.");
+      setResultNotice("unknown", "OCR nicht möglich", payload.message || "Nutze die manuelle Prüfung.");
+    } else {
+      renderLiveScanStatus();
+    }
   }
 }
 
@@ -589,8 +681,293 @@ function setProgress(value, label, detail) {
   els.modelProgressDetail.textContent = detail;
 }
 
-async function scanCameraFrame() {
-  if (state.busy) {
+function reserveWorkerSlot(isLiveScan) {
+  const slots = getLiveWorkerSlots(isLiveScan);
+  const slot = slots.find((candidate) => isSlotReady(candidate) && !candidate.busy);
+  if (!slot) {
+    return null;
+  }
+
+  slot.busy = true;
+  slot.requestId = ++state.scanSequence;
+  slot.mode = isLiveScan ? "live" : "single";
+  state.activeScans += 1;
+  setBusy(true);
+  return slot;
+}
+
+function releaseWorkerSlot(slot) {
+  if (!slot?.busy) {
+    return;
+  }
+
+  slot.busy = false;
+  slot.requestId = null;
+  slot.mode = null;
+  state.activeScans = Math.max(0, state.activeScans - 1);
+  setBusy(state.activeScans > 0);
+}
+
+function getLiveWorkerSlots(isLiveScan) {
+  const targetCount = isLiveScan ? getLiveWorkerTargetCount() : 1;
+  const slots = [];
+  for (let index = 0; index < targetCount; index += 1) {
+    const slot = getWorkerSlot(index);
+    slots.push(slot);
+    if (!isSlotReady(slot) && !slot.loading) {
+      ensureModelReady(slot);
+    }
+  }
+  return slots;
+}
+
+function warmLiveWorkerPool() {
+  getLiveWorkerSlots(true);
+  renderLiveScanStatus();
+}
+
+function getLiveWorkerTargetCount() {
+  if (state.settings.modelId !== DEFAULT_MODEL_ID) {
+    return 1;
+  }
+  return LIVE_TESSERACT_WORKER_LIMIT;
+}
+
+function getLiveTesseractWorkerLimit() {
+  const cores = Number(navigator.hardwareConcurrency || 4);
+  if (cores >= 8) {
+    return 4;
+  }
+  if (cores >= 4) {
+    return 3;
+  }
+  return 2;
+}
+
+function handleRecognizedText(text, payload = {}, isLiveScan = Boolean(state.loopTimer)) {
+  const nextText = isLiveScan ? updateLiveFusion(text, payload) : text;
+  analyzeAndRender(nextText, isLiveScan ? "live" : "ocr");
+  if (state.settings.autoCopy && nextText) {
+    els.manualText.value = nextText;
+  }
+  if (isLiveScan) {
+    recordLiveProcessedFrame();
+  }
+}
+
+function getRuntimeResultLabel(durationMs, isLiveScan = Boolean(state.loopTimer)) {
+  const duration = durationMs ? formatDuration(durationMs) : "";
+  if (!isLiveScan) {
+    return duration ? `OCR ${duration}` : "OCR offline bereit";
+  }
+
+  const readyWorkers = getReadyWorkerCount();
+  return duration ? `Live ${duration} · ${readyWorkers} OCR` : `Live-OCR · ${readyWorkers} OCR`;
+}
+
+function getReadyWorkerCount() {
+  return state.workerPool.filter((slot) => isSlotReady(slot)).length;
+}
+
+function createLiveFusionState() {
+  return {
+    frames: [],
+    mergedText: "",
+  };
+}
+
+function resetLiveFusion() {
+  state.liveFusion = createLiveFusionState();
+}
+
+function updateLiveFusion(text, payload = {}) {
+  const cleanedText = cleanupFusionText(text);
+  const now = performance.now();
+  if (cleanedText) {
+    state.liveFusion.frames.push({
+      text: cleanedText,
+      confidence: Number(payload.confidence || 0),
+      timestamp: now,
+      quality: scoreTextQuality(cleanedText, payload.confidence),
+    });
+  }
+
+  state.liveFusion.frames = state.liveFusion.frames
+    .filter((frame) => now - frame.timestamp <= LIVE_RESULT_WINDOW_MS)
+    .slice(-LIVE_RESULT_MAX_FRAMES);
+  state.liveFusion.mergedText = mergeLiveTextFrames(state.liveFusion.frames);
+  return state.liveFusion.mergedText;
+}
+
+function cleanupFusionText(text) {
+  return String(text || "")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function mergeLiveTextFrames(frames) {
+  if (!frames.length) {
+    return "";
+  }
+
+  const bestFrame = frames.reduce((best, frame) => (frame.quality > best.quality ? frame : best), frames[0]);
+  const lines = [];
+  addUniqueFusionLines(lines, bestFrame.text, bestFrame.quality);
+
+  for (const frame of frames) {
+    if (frame === bestFrame) {
+      continue;
+    }
+    addUniqueFusionLines(lines, frame.text, frame.quality);
+  }
+
+  return lines
+    .sort((left, right) => left.firstSeen - right.firstSeen)
+    .map((line) => line.text)
+    .join("\n")
+    .trim();
+}
+
+function addUniqueFusionLines(lines, text, quality) {
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    const normalized = normalizeText(line);
+    if (normalized.replace(/\s+/g, "").length < 4) {
+      continue;
+    }
+
+    const existing = lines.find((candidate) => areSimilarFusionLines(candidate.normalized, normalized));
+    const lineQuality = scoreTextQuality(line, quality);
+    if (existing) {
+      if (lineQuality > existing.quality) {
+        existing.text = line;
+        existing.normalized = normalized;
+        existing.quality = lineQuality;
+      }
+      continue;
+    }
+
+    lines.push({
+      text: line,
+      normalized,
+      quality: lineQuality,
+      firstSeen: lines.length,
+    });
+  }
+}
+
+function areSimilarFusionLines(left, right) {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  const leftCompact = left.replace(/\s+/g, "");
+  const rightCompact = right.replace(/\s+/g, "");
+  if (leftCompact.length >= 10 && rightCompact.length >= 10) {
+    const maxDistance = Math.max(2, Math.round(Math.min(leftCompact.length, rightCompact.length) * 0.12));
+    if (levenshteinWithin(leftCompact, rightCompact, maxDistance)) {
+      return true;
+    }
+  }
+
+  const leftTokens = getFusionTokens(left);
+  const rightTokens = getFusionTokens(right);
+  if (!leftTokens.length || !rightTokens.length) {
+    return false;
+  }
+
+  const rightSet = new Set(rightTokens);
+  const overlap = leftTokens.filter((token) => rightSet.has(token)).length;
+  return overlap / Math.min(leftTokens.length, rightTokens.length) >= 0.78;
+}
+
+function getFusionTokens(text) {
+  return text.split(/\s+/).filter((token) => token.length > 2);
+}
+
+function scoreTextQuality(text, confidence = 0) {
+  const letterCount = (text.match(/\p{L}/gu) || []).length;
+  const digitCount = (text.match(/\p{N}/gu) || []).length;
+  const wordCount = text.split(/\s+/).filter((token) => token.length > 2).length;
+  const oddCharacterCount = (text.match(/[^\p{L}\p{N}\s.,;:!?%()[\]{}+\-/&äöüÄÖÜß]/gu) || []).length;
+  return letterCount + digitCount * 0.35 + wordCount * 3 + Number(confidence || 0) * 0.5 - oddCharacterCount * 4;
+}
+
+function createLiveStats() {
+  return {
+    startedAt: 0,
+    submitted: 0,
+    processed: 0,
+    dropped: 0,
+    lastRenderAt: 0,
+  };
+}
+
+function resetLiveStats() {
+  state.liveStats = {
+    ...createLiveStats(),
+    startedAt: performance.now(),
+  };
+}
+
+function recordLiveSubmittedFrame() {
+  if (!state.loopTimer) {
+    return;
+  }
+  state.liveStats.submitted += 1;
+  renderLiveScanStatus();
+}
+
+function recordLiveProcessedFrame() {
+  state.liveStats.processed += 1;
+  renderLiveScanStatus();
+}
+
+function recordLiveDroppedFrame() {
+  if (!state.loopTimer) {
+    return;
+  }
+  state.liveStats.dropped += 1;
+  renderLiveScanStatus();
+}
+
+function renderLiveScanStatus(force = false) {
+  if (!state.loopTimer) {
+    return;
+  }
+
+  const now = performance.now();
+  if (!force && now - state.liveStats.lastRenderAt < LIVE_STATUS_UPDATE_MS) {
+    return;
+  }
+
+  state.liveStats.lastRenderAt = now;
+  const targetFps = getTargetLiveFps();
+  const elapsedSeconds = Math.max(0.1, (now - state.liveStats.startedAt) / 1000);
+  const processedFps = state.liveStats.processed / elapsedSeconds;
+  const readyWorkers = getReadyWorkerCount();
+  els.scanModeLabel.textContent = `Live ${formatFps(processedFps)}/${formatFps(targetFps)} fps · ${readyWorkers} OCR`;
+}
+
+function getTargetLiveFps() {
+  return Math.min(10, 1000 / Math.max(100, state.settings.intervalMs));
+}
+
+function formatFps(value) {
+  const rounded = value >= 9.95 ? Math.round(value) : Math.round(value * 10) / 10;
+  return String(rounded).replace(".", ",");
+}
+
+async function scanCameraFrame(mode = "single") {
+  const isLiveScan = mode === "live";
+  if (!isLiveScan && state.busy) {
     return;
   }
 
@@ -608,19 +985,48 @@ async function scanCameraFrame() {
     return;
   }
 
-  const capture = await captureScanImage();
+  if (isLiveScan) {
+    warmLiveWorkerPool();
+  }
+
+  if (state.capturingFrame) {
+    recordLiveDroppedFrame();
+    return;
+  }
+
+  const slot = reserveWorkerSlot(isLiveScan);
+  if (!slot) {
+    recordLiveDroppedFrame();
+    return;
+  }
+
+  state.capturingFrame = true;
+  let capture = null;
+  try {
+    capture = await captureScanImage(isLiveScan);
+  } finally {
+    state.capturingFrame = false;
+  }
   if (!capture?.blob) {
+    releaseWorkerSlot(slot);
     setResultNotice("unknown", "Kein Kamerabild", "Die Kamera liefert noch kein stabiles Bild.");
     return;
   }
 
-  state.busy = true;
-  setBusy(true);
-  setRuntimeStatus("OCR läuft", "warn");
-  getWorker().postMessage({ type: "scan", image: capture.blob, options: capture.options });
+  setRuntimeStatus(isLiveScan ? "Live-OCR läuft" : "OCR läuft", "warn");
+  slot.worker.postMessage({
+    type: "scan",
+    requestId: slot.requestId,
+    image: capture.blob,
+    options: {
+      ...capture.options,
+      allowFallback: !isLiveScan,
+    },
+  });
+  recordLiveSubmittedFrame();
 }
 
-async function captureScanImage() {
+async function captureScanImage(isLiveScan = false) {
   const video = els.cameraVideo;
   if (!video.videoWidth || !video.videoHeight) {
     return null;
@@ -628,7 +1034,7 @@ async function captureScanImage() {
 
   const profile = getCurrentScanProfile();
   const crop = getVisibleScanCrop(video, els.scanFrame, profile);
-  const targetWidth = getTargetScanWidth(crop, profile, Boolean(state.loopTimer));
+  const targetWidth = getTargetScanWidth(crop, profile, isLiveScan);
   const targetHeight = Math.round((crop.height / crop.width) * targetWidth);
   const canvas = els.captureCanvas;
   canvas.width = targetWidth + OCR_CANVAS_PADDING * 2;
@@ -867,12 +1273,14 @@ function toggleLoopScan() {
 }
 
 function startLoopScan() {
+  resetLiveFusion();
+  resetLiveStats();
   els.loopButton.setAttribute("aria-pressed", "true");
   els.loopButton.querySelector("use").setAttribute("href", "#icon-pause");
   els.loopButton.querySelector("span").textContent = "Live stoppen";
-  els.scanModeLabel.textContent = "Live-Scan";
-  scanCameraFrame();
-  state.loopTimer = window.setInterval(() => scanCameraFrame(), state.settings.intervalMs);
+  state.loopTimer = window.setInterval(() => scanCameraFrame("live"), state.settings.intervalMs);
+  renderLiveScanStatus(true);
+  scanCameraFrame("live");
 }
 
 function stopLoopScan() {
@@ -887,6 +1295,7 @@ function stopLoopScan() {
 }
 
 function setBusy(isBusy) {
+  state.busy = isBusy;
   els.body.classList.toggle("is-busy", isBusy);
   els.scanButton.disabled = isBusy;
 }

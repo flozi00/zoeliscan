@@ -13,7 +13,7 @@ let transformersModulePromise = null;
 let trocrRecognizer = null;
 
 self.addEventListener("message", async (event) => {
-  const { type, modelId, image, options } = event.data || {};
+  const { type, modelId, image, options, requestId } = event.data || {};
 
   try {
     if (type === "load") {
@@ -22,7 +22,7 @@ self.addEventListener("message", async (event) => {
     }
 
     if (type === "scan") {
-      await recognizeImage(image, options);
+      await recognizeImage(image, options, requestId);
       return;
     }
 
@@ -33,6 +33,7 @@ self.addEventListener("message", async (event) => {
     loadPromise = null;
     postMessage({
       type: "error",
+      requestId,
       payload: {
         message: error?.message || "OCR konnte nicht ausgeführt werden.",
       },
@@ -148,19 +149,22 @@ async function loadTrocrRecognizer(config) {
   return trocrRecognizer;
 }
 
-async function recognizeImage(blob, options = {}) {
+async function recognizeImage(blob, options = {}, requestId = null) {
   const config = getEngineConfig(activeModelId || DEFAULT_MODEL_ID);
   const recognizer = await loadRecognizer(config.id);
   const startedAt = performance.now();
-  const text =
+  const result =
     config.engine === "tesseract"
       ? await recognizeWithTesseract(recognizer, blob, options)
-      : await recognizeWithTrocr(recognizer, blob);
+      : { text: await recognizeWithTrocr(recognizer, blob), confidence: 0, pageSegMode: null };
 
   postMessage({
     type: "result",
+    requestId,
     payload: {
-      text: cleanupText(text),
+      text: cleanupText(result.text),
+      confidence: Number(result.confidence || 0),
+      pageSegMode: result.pageSegMode,
       durationMs: Math.round(performance.now() - startedAt),
       modelId: config.id,
       engine: config.engine,
@@ -173,8 +177,8 @@ async function recognizeWithTesseract(worker, blob, options = {}) {
   const fallbackPsm = String(options.fallbackPsm || "11");
   const primary = await runTesseractPass(worker, blob, primaryPsm);
 
-  if (!shouldRunTesseractFallback(primary, options, primaryPsm, fallbackPsm)) {
-    return primary.text;
+  if (options.allowFallback === false || !shouldRunTesseractFallback(primary, options, primaryPsm, fallbackPsm)) {
+    return primary;
   }
 
   postMessage({
@@ -187,7 +191,7 @@ async function recognizeWithTesseract(worker, blob, options = {}) {
   });
 
   const fallback = await runTesseractPass(worker, blob, fallbackPsm);
-  return chooseTesseractCandidate(primary, fallback).text;
+  return chooseTesseractCandidate(primary, fallback);
 }
 
 async function runTesseractPass(worker, blob, pageSegMode) {
@@ -270,6 +274,7 @@ function postReady(config) {
   postMessage({
     type: "ready",
     payload: {
+      id: config.id,
       modelId: config.label,
       engine: config.engine,
     },

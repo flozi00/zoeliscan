@@ -1,12 +1,15 @@
-const APP_CACHE = "zoli-scan-app-v6";
-const RUNTIME_CACHE = "zoli-scan-runtime-v6";
+const APP_CACHE = "zoli-scan-app-v7";
+const RUNTIME_CACHE = "zoli-scan-runtime-v7";
+const APP_VERSION = "2026-06-07-live-ocr-v1";
 
 const APP_ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  `./app.js?v=${APP_VERSION}`,
   "./ocr-worker.js",
+  `./ocr-worker.js?v=${APP_VERSION}`,
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-192.png",
